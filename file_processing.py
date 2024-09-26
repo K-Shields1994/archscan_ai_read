@@ -1,5 +1,6 @@
 import os
 import requests
+import json
 
 
 def process_folder(endpoint, api_key, input_folder, json_output_path, unsupported_log_path, output_folder_path):
@@ -28,7 +29,7 @@ def process_folder(endpoint, api_key, input_folder, json_output_path, unsupporte
                 if response.status_code == 202:
                     # Poll for the result (getting the operation-location)
                     operation_location = response.headers['Operation-Location']
-                    poll_for_searchable_pdf(operation_location, api_key, output_folder_path, file_name)
+                    poll_for_searchable_pdf(operation_location, api_key, output_folder_path, file_name, json_output_path)
                 else:
                     print(f"Failed to process {file_name}, Status Code: {response.status_code}")
 
@@ -39,7 +40,7 @@ def process_folder(endpoint, api_key, input_folder, json_output_path, unsupporte
 
 
 # Polling the API for the PDF results and downloading the file
-def poll_for_searchable_pdf(operation_url, api_key, output_folder_path, file_name):
+def poll_for_searchable_pdf(operation_url, api_key, output_folder_path, file_name, json_output_path):
     headers = {
         'Ocp-Apim-Subscription-Key': api_key
     }
@@ -50,6 +51,13 @@ def poll_for_searchable_pdf(operation_url, api_key, output_folder_path, file_nam
         result = poll_response.json()
 
         if poll_response.status_code == 200 and result['status'] == 'succeeded':
+            # Create a valid path for the JSON file by joining the directory path and the file name
+            json_file_path = os.path.join(json_output_path, file_name.replace('.pdf', '.json'))
+            
+            # Save the result as a JSON file
+            with open(json_file_path, 'w') as json_file:
+                json.dump(result, json_file, indent=4)
+
             # Check if 'contentUrl' is present
             if 'analyzeResult' in result and 'contentUrl' in result['analyzeResult']:
                 # Get the searchable PDF URL from the result
