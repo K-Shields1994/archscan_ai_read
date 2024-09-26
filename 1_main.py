@@ -1,11 +1,8 @@
 import os
 from azure.core.credentials import AzureKeyCredential
-from azure.ai.formrecognizer import DocumentAnalysisClient
-from model import MODEL_IDS
-from file_processing import process_folder
+from file_processing import process_folder  # Import the function from file_processing
 from json_excel_utils import save_to_json
 from gui import run_gui
-
 
 # Function to read Azure credentials from a text file
 def read_credentials(file_path):
@@ -16,30 +13,22 @@ def read_credentials(file_path):
             ai_credentials[key] = value.strip('"')
     return ai_credentials
 
-
 # Read credentials from the azure_credentials.txt file
 credentials_file_path = "azure_credentials.txt"
 credentials = read_credentials(credentials_file_path)
 
 # Azure Form Recognizer credentials
-endpoint = credentials["endpoint"]
-api_key = credentials["api_key"]
-
-# Initialize client
-client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(api_key))
-
+endpoint = credentials["endpoint"]  # Endpoint is read from the file
+api_key = credentials["api_key"]  # API Key is read from the file
 
 # Function to handle folder selection and processing
 def handle_folder_upload(input_folder_path, output_folder_path):
-    model_id = MODEL_IDS["prebuilt-read"]
-
     # Generate file paths dynamically based on the output folder
     json_file_path = os.path.join(output_folder_path, "document_results.json")
     unsupported_files_log = os.path.join(output_folder_path, "unsupported_files.txt")
 
-    # Process the uploaded folder (input folder)
-    all_results, unsupported_files = process_folder(client, model_id, input_folder_path, json_file_path,
-                                                    unsupported_files_log)
+    # Pass the credentials (endpoint and api_key) to the processing function
+    all_results, unsupported_files = process_folder(endpoint, api_key, input_folder_path, json_file_path, unsupported_files_log, output_folder_path)
 
     # Save the results to JSON
     save_to_json(json_file_path, all_results)
@@ -49,6 +38,5 @@ def handle_folder_upload(input_folder_path, output_folder_path):
         with open(unsupported_files_log, 'w') as log_file:
             log_file.write("\n".join(unsupported_files))
 
-
 if __name__ == "__main__":
-    run_gui(handle_folder_upload)  # Call the GUI and pass the processing function to it
+    run_gui(handle_folder_upload)
