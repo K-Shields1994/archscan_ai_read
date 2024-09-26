@@ -50,10 +50,16 @@ def poll_for_searchable_pdf(operation_url, api_key, output_folder_path, file_nam
         result = poll_response.json()
 
         if poll_response.status_code == 200 and result['status'] == 'succeeded':
-            # Get the searchable PDF URL from the result
-            pdf_url = result['analyzeResult']['contentUrl']
-            download_pdf(pdf_url, output_folder_path, file_name)
-            break
+            # Check if 'contentUrl' is present
+            if 'analyzeResult' in result and 'contentUrl' in result['analyzeResult']:
+                # Get the searchable PDF URL from the result
+                pdf_url = result['analyzeResult']['contentUrl']
+                download_pdf(pdf_url, output_folder_path, file_name)
+                break
+            else:
+                # Log the full response for debugging if 'contentUrl' is missing
+                print(f"Unexpected response structure: {result}")
+                break
         elif poll_response.status_code == 200 and result['status'] == 'failed':
             print(f"Document analysis failed for {file_name}.")
             break
