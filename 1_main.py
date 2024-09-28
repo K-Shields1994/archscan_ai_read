@@ -14,14 +14,24 @@ from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-# Please provide your Azure Form Recognizer endpoint and key
-endpoint = "https://as-lf-ai-01.cognitiveservices.azure.com/"
-key = "18ce006f0ac44579a36bfaf01653254c"
+
+# Function to load Azure credentials from a text file
+def load_azure_credentials(file_path):
+    try:
+        with open(file_path, 'r') as file:
+            lines = file.readlines()
+            endpoint = lines[0].split('=')[1].strip().strip('"')
+            api_key = lines[1].split('=')[1].strip().strip('"')
+        return endpoint, api_key
+    except Exception as e:
+        raise Exception(f"Error reading Azure credentials from file: {e}")
+
 
 def dist(p1, p2):
     return math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y))
 
-def process_pdf(input_folder, output_folder, filename):
+
+def process_pdf(input_folder, output_folder, filename, endpoint, api_key):
     try:
         input_file = os.path.join(input_folder, filename)
         output_pdf_file = os.path.join(output_folder, filename.replace('.pdf', '.ocr.pdf'))
@@ -38,7 +48,7 @@ def process_pdf(input_folder, output_folder, filename):
 
         # Running OCR using Azure Form Recognizer Read API
         print(f"Starting Azure Form Recognizer OCR process for {filename}...")
-        document_analysis_client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(key))
+        document_analysis_client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(api_key))
 
         with open(input_file, "rb") as f:
             poller = document_analysis_client.begin_analyze_document("prebuilt-read", document=f)
@@ -117,7 +127,7 @@ def process_pdf(input_folder, output_folder, filename):
         print(f"Failed to process {filename}: {e}")
 
 
-def handle_folder_upload(input_folder, output_folder):
+def handle_folder_upload(input_folder, output_folder, endpoint, api_key):
     """Process PDFs from the input folder and save output in the output folder."""
     result = ""
     try:
@@ -127,7 +137,7 @@ def handle_folder_upload(input_folder, output_folder):
             pdf_files = [f for f in os.listdir(input_folder) if f.lower().endswith('.pdf')]
             for pdf in pdf_files:
                 result += f"Processing {pdf}\n"
-                executor.submit(process_pdf, input_folder, output_folder, pdf)
+                executor.submit(process_pdf, input_folder, output_folder, pdf, endpoint, api_key)
 
         result += "Processing completed successfully!\n"
     except Exception as e:
@@ -138,19 +148,30 @@ def handle_folder_upload(input_folder, output_folder):
 
 def start_gui():
     """Starts the Tkinter GUI and allows users to choose folders."""
-    # Initialize variables to hold selected folders
+    # Initialize variables to hold selected folders and credentials
     selected_input_folder = None
     selected_output_folder = None
+    credentials_file_path = "azure_credentials.txt"  # Path to the credentials file
+
+    try:
+        endpoint, api_key = load_azure_credentials(credentials_file_path)
+        print(f"Azure endpoint and key loaded successfully!")
+    except Exception as e:
+        print(f"Failed to load credentials: {e}")
+        messagebox.showerror("Error", f"Failed to load credentials: {e}")
+        return
 
     def upload_folder():
         nonlocal selected_input_folder
         selected_input_folder = filedialog.askdirectory(title="Choose Input Folder")
-        folder_label.config(text=f"Input folder: {selected_input_folder}" if selected_input_folder else "No folder selected")
+        folder_label.config(
+            text=f"Input folder: {selected_input_folder}" if selected_input_folder else "No folder selected")
 
     def choose_output_folder():
         nonlocal selected_output_folder
         selected_output_folder = filedialog.askdirectory(title="Choose Output Folder")
-        destination_label.config(text=f"Output folder: {selected_output_folder}" if selected_output_folder else "No folder selected")
+        destination_label.config(
+            text=f"Output folder: {selected_output_folder}" if selected_output_folder else "No folder selected")
 
     def run_process():
         if not selected_input_folder or not selected_output_folder:
@@ -158,7 +179,7 @@ def start_gui():
             return
 
         status_label.config(text="Processing...")
-        result = handle_folder_upload(selected_input_folder, selected_output_folder)
+        result = handle_folder_upload(selected_input_folder, selected_output_folder, endpoint, api_key)
         output_text.delete(1.0, tk.END)
         output_text.insert(tk.END, result)
         status_label.config(text="Processing completed!")
