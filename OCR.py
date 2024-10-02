@@ -1,18 +1,19 @@
-import sys
-import io
-import math
-import json
-import os
-from pdf2image import convert_from_path
-from reportlab.pdfgen import canvas
-from reportlab.lib import pagesizes
-from PIL import Image, ImageSequence
-from pypdf import PdfWriter, PdfReader
-from azure.core.credentials import AzureKeyCredential
-from azure.ai.formrecognizer import DocumentAnalysisClient
-from concurrent.futures import ThreadPoolExecutor
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+import sys  # Access system-related parameters and functions.
+import io  # Work with in-memory streams.
+import math  # Perform mathematical operations.
+import json  # Handle JSON data (read/write).
+import os  # Interact with the operating system (files, directories).
+from pdf2image import convert_from_path  # Convert PDF pages to images.
+from reportlab.pdfgen import canvas  # Generate PDF documents.
+from reportlab.lib import pagesizes  # Define standard page sizes.
+from PIL import Image, ImageSequence  # Process images and image sequences.
+from pypdf import PdfWriter, PdfReader  # Read and write PDF files.
+from azure.core.credentials import AzureKeyCredential  # Manage Azure credentials.
+from azure.ai.formrecognizer import DocumentAnalysisClient  # Interact with Azure Form Recognizer.
+from concurrent.futures import ThreadPoolExecutor  # Execute tasks concurrently with threads.
+import tkinter as tk  # Create a GUI application.
+from tkinter import filedialog, messagebox, scrolledtext, \
+    ttk  # Use dialogs, message boxes, scrollable text, and themed widgets in Tkinter.
 
 
 # Function to load Azure credentials from a text file
@@ -31,16 +32,16 @@ def dist(p1, p2):
     return math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y))
 
 
-def process_pdf(input_folder, output_folder, filename, endpoint, api_key):
+def process_pdf(input_file, output_folder, filename, endpoint, api_key):
     try:
-        input_file = os.path.join(input_folder, filename)
-        output_pdf_file = os.path.join(output_folder, filename.replace('.pdf', '.ocr.pdf'))
+        output_pdf_file = os.path.join(output_folder, filename.replace('.pdf', '.pdf'))
         json_output_file = os.path.join(output_folder, filename.replace('.pdf', '.json'))
+        words_output_file = os.path.join(output_folder, filename.replace('.pdf', '.txt'))
 
         # Loading input file
         print(f"Loading input file {input_file}")
         if input_file.lower().endswith('.pdf'):
-            # read existing PDF as images
+            # Read existing PDF as images
             image_pages = convert_from_path(input_file)
         else:
             print(f"Error: Unsupported input file extension for {input_file}")
@@ -59,6 +60,9 @@ def process_pdf(input_folder, output_folder, filename, endpoint, api_key):
         # Save OCR results to JSON file
         with open(json_output_file, "w") as json_file:
             json.dump(ocr_results.to_dict(), json_file, indent=4)
+
+        # Extract words and save to a text file
+        extract_words_from_json(ocr_results.to_dict(), words_output_file)
 
         # Generate OCR overlay layer
         print(f"Generating searchable PDF for {filename}...")
@@ -122,22 +126,59 @@ def process_pdf(input_folder, output_folder, filename, endpoint, api_key):
 
         print(f"Searchable PDF created: {output_pdf_file}")
         print(f"OCR results saved as JSON: {json_output_file}")
+        print(f"Words extracted and saved to text file: {words_output_file}")
 
     except Exception as e:
         print(f"Failed to process {filename}: {e}")
 
 
+def extract_words_from_json(ocr_data, output_text_file):
+    try:
+        words_list = []
+
+        # Iterate over the pages and words in the OCR result
+        for page in ocr_data.get("pages", []):
+            for word in page.get("words", []):
+                content = word.get("content", "")
+                words_list.append(content)
+
+        # Write all found words into the text file
+        with open(output_text_file, 'w') as output_file:
+            output_file.write("\n".join(words_list))
+
+        print(f"Extracted words saved to {output_text_file}")
+
+    except Exception as e:
+        print(f"Error processing OCR data: {e}")
+
+
 def handle_folder_upload(input_folder, output_folder, endpoint, api_key):
-    """Process PDFs from the input folder and save output in the output folder."""
+    """Process PDFs from the input folder and subdirectories, and stop after the last PDF."""
     result = ""
     try:
         os.makedirs(output_folder, exist_ok=True)
 
+        # Walk through the folder and subfolders to find PDFs
+        pdf_files = []
+        for root, dirs, files in os.walk(input_folder):
+            for file in files:
+                if file.lower().endswith('.pdf'):
+                    pdf_files.append(os.path.join(root, file))
+
+        if not pdf_files:
+            result += "No PDF files found!\n"
+            return result
+
+        # Processing PDF files in sequence and stopping after the last one
         with ThreadPoolExecutor() as executor:
-            pdf_files = [f for f in os.listdir(input_folder) if f.lower().endswith('.pdf')]
-            for pdf in pdf_files:
-                result += f"Processing {pdf}\n"
-                executor.submit(process_pdf, input_folder, output_folder, pdf, endpoint, api_key)
+            for i, pdf_file in enumerate(pdf_files):
+                filename = os.path.basename(pdf_file)
+                result += f"Processing {filename}\n"
+                executor.submit(process_pdf, pdf_file, output_folder, filename, endpoint, api_key)
+
+                if i == len(pdf_files) - 1:
+                    print("Last PDF processed. Stopping the program.")
+                    break
 
         result += "Processing completed successfully!\n"
     except Exception as e:
@@ -151,7 +192,7 @@ def start_gui():
     # Initialize variables to hold selected folders and credentials
     selected_input_folder = None
     selected_output_folder = None
-    credentials_file_path = "azure_credentials.txt"  # Path to the credentials file
+    credentials_file_path = "/Volumes/SSD/python_projects/archscan_ai_read/azure_credentials.txt"  # Path to the credentials file
 
     try:
         endpoint, api_key = load_azure_credentials(credentials_file_path)
@@ -171,7 +212,7 @@ def start_gui():
         nonlocal selected_output_folder
         selected_output_folder = filedialog.askdirectory(title="Choose Output Folder")
         destination_label.config(
-            text=f"Output folder: {selected_output_folder}" if selected_output_folder else "No folder selected")
+            text=f"Output folder: {selected_output_folder}" if selected_output_folder else "No output folder selected")
 
     def run_process():
         if not selected_input_folder or not selected_output_folder:
