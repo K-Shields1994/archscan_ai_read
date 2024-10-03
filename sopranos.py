@@ -16,12 +16,12 @@ output_file = '/Volumes/SSD/pg_hs/1_test/PGCPS-LF-03384/PGCPS-LF-03384_P001_ocr.
 
 
 def main():
-    # Loading input file
+    # Load the input file
     print(f"Loading input file {input_file}")
     if not input_file.lower().endswith('.pdf'):
         sys.exit(f"Error: Unsupported input file extension {input_file}. Supported extension: PDF")
 
-    # Running OCR using Azure Form Recognizer Read API
+    # Start OCR process with Azure Form Recognizer
     print(f"Starting Azure Form Recognizer OCR process...")
     document_analysis_client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
@@ -29,14 +29,12 @@ def main():
         poller = document_analysis_client.begin_analyze_document("prebuilt-read", document=f)
 
     ocr_results = poller.result()
-    print(f"Azure Form Recognizer finished OCR text for {len(ocr_results.pages)} pages.")
+    print(f"OCR completed for {len(ocr_results.pages)} pages.")
 
-    # Generate OCR overlay layer for the searchable PDF
-    print(f"Generating searchable PDF...")
+    # Create searchable PDF
     output = PdfWriter()
     default_font = "Times-Roman"
 
-    # Open original PDF to use as a background
     with open(input_file, "rb") as input_pdf_stream:
         original_pdf = PdfReader(input_pdf_stream)
 
@@ -52,6 +50,11 @@ def main():
             scale = (page_width / page.width + page_height / page.height) / 2.0
             pdf_canvas = canvas.Canvas(ocr_overlay, pagesize=(page_width, page_height))
 
+            # Apply a 180-degree rotation to the entire text overlay
+            pdf_canvas.translate(page_width / 2, page_height / 2)  # Move origin to center of the page
+            pdf_canvas.rotate(180)  # Rotate the canvas by 180 degrees
+            pdf_canvas.translate(-page_width / 2, -page_height / 2)  # Move origin back to the corner
+
             text = pdf_canvas.beginText()
             text.setTextRenderMode(3)  # Set text rendering mode to invisible
 
@@ -61,21 +64,14 @@ def main():
                 word_height = word.polygon[3].y - word.polygon[0].y
                 font_size = word_height * scale
 
-                # Calculate text position (adjust for PDF's flipped y-axis)
+                # Adjust text position (flipping Y-axis for correct placement)
                 x_position = word.polygon[0].x * scale
-                y_position = page_height - word.polygon[0].y * scale
+                y_position = (page_height - word.polygon[0].y * scale)
 
-                # Calculate rotation angle and apply 180-degree correction
-                dx = word.polygon[1].x - word.polygon[0].x
-                dy = word.polygon[1].y - word.polygon[0].y
-                text_angle = math.atan2(dy, dx) + math.pi  # Rotate by 180 degrees
-
+                # Set font and place the word in the correct position (no rotation per word)
                 text.setFont(default_font, font_size)
-                text.setTextTransform(
-                    math.cos(text_angle), -math.sin(text_angle),
-                    math.sin(text_angle), math.cos(text_angle),
-                    x_position, y_position
-                )
+                text.setTextTransform(1, 0, 0, 1, x_position,
+                                      y_position)  # No rotation here, since entire canvas is rotated
 
                 # Render the invisible text
                 text.textOut(word.content + " ")
