@@ -32,9 +32,11 @@ def main():
     print(f"Starting Azure Form Recognizer OCR process...")
     document_analysis_client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
-    # Open the input PDF file in binary mode for processing
+    # Open the input PDF file in binary mode for processing. "rb" means "read binary"
     with open(input_file, "rb") as f:
         poller = document_analysis_client.begin_analyze_document("prebuilt-read", document=f)
+        # Poller represents operations that don’t return results immediately, allowing the program
+        # to monitor the status of the analysis and retrieve results when the operation is complete.
 
     # Retrieve OCR results from Azure after processing
     ocr_results = poller.result()
