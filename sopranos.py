@@ -16,9 +16,9 @@ input_file = '/Volumes/SSD/pg_hs/1_test/PGCPS-LF-03384/PGCPS-LF-03384_P001.pdf'
 output_file = '/Volumes/SSD/pg_hs/1_test/PGCPS-LF-03384/PGCPS-LF-03384_P001_ocr.pdf'
 
 
-# Function to calculate the distance between two points (p1, p2)
+# Function to calculate the Euclidean distance between two points (p1, p2) in a 2D space
 def dist(p1, p2):
-    return math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y))
+    return math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
 
 
 # Main function to run OCR and create a searchable PDF
