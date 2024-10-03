@@ -15,35 +15,27 @@ key = "18ce006f0ac44579a36bfaf01653254c"
 input_file = '/Volumes/SSD/pg_hs/1_test/PGCPS-LF-03384/PGCPS-LF-03384_P001.pdf'
 output_file = '/Volumes/SSD/pg_hs/1_test/PGCPS-LF-03384/PGCPS-LF-03384_P001_ocr.pdf'
 
-
-# Function to calculate the Euclidean distance between two points (p1, p2) in a 2D space
-def dist(p1, p2):
-    return math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
-
-
 # Main function to run OCR and create a searchable PDF
 def main():
     # Load the input file and verify it's a PDF
-    print(f"Loading input file {input_file}")
+    print(f"1. Loading input file {input_file}")
     if not input_file.lower().endswith('.pdf'):
         sys.exit(f"Error: Unsupported input file extension {input_file}. Supported extension: PDF")
 
     # Initialize Azure Form Recognizer client and start OCR process
-    print(f"Starting Azure Form Recognizer OCR process...")
+    print(f"2. Starting Azure Form Recognizer OCR process...")
     document_analysis_client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
     # Open the input PDF file in binary mode for processing. "rb" means "read binary"
     with open(input_file, "rb") as f:
         poller = document_analysis_client.begin_analyze_document("prebuilt-read", document=f)
-        # Poller represents operations that don’t return results immediately, allowing the program
-        # to monitor the status of the analysis and retrieve results when the operation is complete.
 
     # Retrieve OCR results from Azure after processing
     ocr_results = poller.result()
-    print(f"Azure Form Recognizer finished OCR text for {len(ocr_results.pages)} pages.")
+    print(f"3. Azure Form Recognizer finished OCR text for {len(ocr_results.pages)} pages.")
 
     # Create a PDF writer to generate the final searchable PDF
-    print(f"Generating searchable PDF...")
+    print(f"5. Generating searchable PDF...")
     output = PdfWriter()
     default_font = "Times-Roman"  # Set default font for the OCR text layer
 
@@ -70,23 +62,33 @@ def main():
 
             # Loop through words on the page and place them on the PDF canvas
             for word in page.words:
-                # Calculate optimal font size based on the word's bounding box
-                desired_text_width = max(dist(word.polygon[0], word.polygon[1]),
-                                         dist(word.polygon[3], word.polygon[2])) * scale
-                desired_text_height = max(dist(word.polygon[1], word.polygon[2]),
-                                          dist(word.polygon[0], word.polygon[3])) * scale
-                font_size = desired_text_height
+                word_width = word.polygon[1].x - word.polygon[0].x
+                word_height = word.polygon[3].y - word.polygon[0].y
+                font_size = word_height * scale
                 actual_text_width = pdf_canvas.stringWidth(word.content, default_font, font_size)
 
+                if actual_text_width == 0:
+                    actual_text_width = 1  # Avoid zero division error
+
+                # Adjust the position to match the original document
+                x_position = word.polygon[0].x * scale
+                y_position = page_height - word.polygon[0].y * scale  # Flip the y-axis for PDF coordinates
+
                 # Calculate text rotation angle based on word orientation
-                text_angle = math.atan2(
-                    (word.polygon[1].y - word.polygon[0].y + word.polygon[2].y - word.polygon[3].y) / 2.0,
-                    (word.polygon[1].x - word.polygon[0].x + word.polygon[2].x - word.polygon[3].x) / 2.0)
+                dx = word.polygon[1].x - word.polygon[0].x
+                dy = word.polygon[1].y - word.polygon[0].y
+                text_angle = math.atan2(dy, dx)  # Calculate angle of text from the first two points
+
+                # Set the font and place the word in the correct position and orientation
                 text.setFont(default_font, font_size)
-                text.setTextTransform(math.cos(text_angle), -math.sin(text_angle), math.sin(text_angle),
-                                      math.cos(text_angle), word.polygon[3].x * scale,
-                                      page_height - word.polygon[3].y * scale)
-                text.setHorizScale(desired_text_width / actual_text_width * 100)  # Adjust text width scaling
+                text.setTextTransform(
+                    math.cos(text_angle), -math.sin(text_angle),
+                    math.sin(text_angle), math.cos(text_angle),
+                    x_position, y_position
+                )
+
+                # Adjust text width scaling
+                text.setHorizScale((word_width * scale) / actual_text_width * 100)
                 text.textOut(word.content + " ")  # Add the OCR text to the canvas
 
             pdf_canvas.drawText(text)  # Finalize text overlay
@@ -95,16 +97,18 @@ def main():
             # Move to the beginning of the buffer for reading
             ocr_overlay.seek(0)
 
-            # Add original PDF page and the OCR overlay to the output PDF
-            new_pdf_page = PdfReader(ocr_overlay)
-            output.add_page(original_page)  # Add original background page
-            output.add_page(new_pdf_page.pages[0])  # Add the OCR overlay
+            # Merge the OCR overlay with the original PDF page
+            overlay_pdf = PdfReader(ocr_overlay)
+            original_page.merge_page(overlay_pdf.pages[0])  # Merge the original page with the OCR overlay
+
+            # Add the merged page (original + OCR overlay) to the final output PDF
+            output.add_page(original_page)
 
     # Write the final searchable PDF to the specified output file
     with open(output_file, "wb") as outputStream:
         output.write(outputStream)
 
-    print(f"Searchable PDF is created: {output_file}")
+    print(f"6. Searchable PDF is created: {output_file}")
 
 
 # Execute the main function when the script is run directly
