@@ -11,8 +11,8 @@ endpoint = "https://as-lf-ai-01.cognitiveservices.azure.com/"
 key = "18ce006f0ac44579a36bfaf01653254c"
 
 # File paths for the input PDF and output searchable PDF
-input_file = '/Volumes/SSD/pg_hs/1_test/PGCPS-LF-03384/PGCPS-LF-03384_P001.pdf'
-output_file = '/Volumes/SSD/pg_hs/1_test/PGCPS-LF-03384/PGCPS-LF-03384_P001_ocr.pdf'
+input_file = 'C:/Users/liams/OneDrive/Desktop/Test_Data/Input_Folder/PGCPS-LF-03384/PGCPS-LF-03384_P002.pdf'
+output_file = 'C:/Users/liams/OneDrive/Desktop/Test_Data/Output_Folder/PGCPS-LF-03384_P002_ocr.pdf'
 
 
 def main():
