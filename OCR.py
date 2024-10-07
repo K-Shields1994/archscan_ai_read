@@ -1,263 +1,152 @@
-import sys  # Access system-related parameters and functions.
-import io  # Work with in-memory streams.
-import math  # Perform mathematical operations.
-import json  # Handle JSON data (read/write).
-import os  # Interact with the operating system (files, directories).
-from pdf2image import convert_from_path  # Convert PDF pages to images.
-from reportlab.pdfgen import canvas  # Generate PDF documents.
-from reportlab.lib import pagesizes  # Define standard page sizes.
-from PIL import Image, ImageSequence  # Process images and image sequences.
-from pypdf import PdfWriter, PdfReader  # Read and write PDF files.
-from azure.core.credentials import AzureKeyCredential  # Manage Azure credentials.
-from azure.ai.formrecognizer import DocumentAnalysisClient  # Interact with Azure Form Recognizer.
-from concurrent.futures import ThreadPoolExecutor  # Execute tasks concurrently with threads.
-import tkinter as tk  # Create a GUI application.
-from tkinter import filedialog, messagebox, scrolledtext, \
-    ttk  # Use dialogs, message boxes, scrollable text, and themed widgets in Tkinter.
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+import os
+import json
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.ai.documentintelligence.models import AnalyzeOutputOption, AnalyzeResult
 
+# List of common English words (stop words) to exclude from the output text files
+STOP_WORDS = set([
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "as", "at", "be",
+    "because", "been", "before", "being", "below", "between", "both", "but", "by", "could", "did", "do", "does",
+    "doing", "down", "during", "each", "few", "for", "from", "further", "had", "has", "have", "having", "he",
+    "her", "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its",
+    "itself", "just", "me", "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once",
+    "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "she", "should",
+    "so", "some", "such", "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there",
+    "these", "they", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
+    "were", "what", "when", "where", "which", "while", "who", "whom", "why", "with", "would", "you", "your",
+    "yours", "yourself", "yourselves"
+])
 
-# Function to load Azure credentials from a text file
-def load_azure_credentials(file_path):
-    try:
-        with open(file_path, 'r') as file:
-            lines = file.readlines()
-            endpoint = lines[0].split('=')[1].strip().strip('"')
-            api_key = lines[1].split('=')[1].strip().strip('"')
-        return endpoint, api_key
-    except Exception as e:
-        raise Exception(f"Error reading Azure credentials from file: {e}")
-
-
-def dist(p1, p2):
-    return math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y))
-
-
-def process_pdf(input_file, output_folder, filename, endpoint, api_key):
-    try:
-        output_pdf_file = os.path.join(output_folder, filename.replace('.pdf', '.pdf'))
-        json_output_file = os.path.join(output_folder, filename.replace('.pdf', '.json'))
-        words_output_file = os.path.join(output_folder, filename.replace('.pdf', '.txt'))
-
-        # Loading input file
-        print(f"Loading input file {input_file}")
-        if input_file.lower().endswith('.pdf'):
-            # Read existing PDF as images
-            image_pages = convert_from_path(input_file)
-        else:
-            print(f"Error: Unsupported input file extension for {input_file}")
-            return
-
-        # Running OCR using Azure Form Recognizer Read API
-        print(f"Starting Azure Form Recognizer OCR process for {filename}...")
-        document_analysis_client = DocumentAnalysisClient(endpoint=endpoint, credential=AzureKeyCredential(api_key))
-
-        with open(input_file, "rb") as f:
-            poller = document_analysis_client.begin_analyze_document("prebuilt-read", document=f)
-
-        ocr_results = poller.result()
-        print(f"Azure Form Recognizer finished OCR text for {len(ocr_results.pages)} pages in {filename}.")
-
-        # Save OCR results to JSON file
-        with open(json_output_file, "w") as json_file:
-            json.dump(ocr_results.to_dict(), json_file, indent=4)
-
-        # Extract words and save to a text file
-        extract_words_from_json(ocr_results.to_dict(), words_output_file)
-
-        # Generate OCR overlay layer
-        print(f"Generating searchable PDF for {filename}...")
-        output = PdfWriter()
-        default_font = "Times-Roman"
-        for page_id, page in enumerate(ocr_results.pages):
-            ocr_overlay = io.BytesIO()
-
-            # Calculate overlay PDF page size
-            if image_pages[page_id].height > image_pages[page_id].width:
-                page_scale = float(image_pages[page_id].height) / pagesizes.letter[1]
-            else:
-                page_scale = float(image_pages[page_id].width) / pagesizes.letter[1]
-
-            page_width = float(image_pages[page_id].width) / page_scale
-            page_height = float(image_pages[page_id].height) / page_scale
-
-            scale = (page_width / page.width + page_height / page.height) / 2.0
-            pdf_canvas = canvas.Canvas(ocr_overlay, pagesize=(page_width, page_height))
-
-            # Add image into PDF page
-            pdf_canvas.drawInlineImage(image_pages[page_id], 0, 0, width=page_width, height=page_height,
-                                       preserveAspectRatio=True)
-
-            text = pdf_canvas.beginText()
-            # Set text rendering mode to invisible
-            text.setTextRenderMode(3)
-            for word in page.words:
-                # Calculate optimal font size
-                desired_text_width = max(dist(word.polygon[0], word.polygon[1]),
-                                         dist(word.polygon[3], word.polygon[2])) * scale
-                desired_text_height = max(dist(word.polygon[1], word.polygon[2]),
-                                          dist(word.polygon[0], word.polygon[3])) * scale
-                font_size = desired_text_height
-                actual_text_width = pdf_canvas.stringWidth(word.content, default_font, font_size)
-
-                # Calculate text rotation angle
-                text_angle = math.atan2(
-                    (word.polygon[1].y - word.polygon[0].y + word.polygon[2].y - word.polygon[3].y) / 2.0,
-                    (word.polygon[1].x - word.polygon[0].x + word.polygon[2].x - word.polygon[3].x) / 2.0)
-                text.setFont(default_font, font_size)
-                text.setTextTransform(math.cos(text_angle), -math.sin(text_angle), math.sin(text_angle),
-                                      math.cos(text_angle),
-                                      word.polygon[3].x * scale, page_height - word.polygon[3].y * scale)
-                text.setHorizScale(desired_text_width / actual_text_width * 100)
-                text.textOut(word.content + " ")
-
-            pdf_canvas.drawText(text)
-            pdf_canvas.save()
-
-            # Move to the beginning of the buffer
-            ocr_overlay.seek(0)
-
-            # Create a new PDF page
-            new_pdf_page = PdfReader(ocr_overlay)
-            output.add_page(new_pdf_page.pages[0])
-
-        # Save output searchable PDF file
-        with open(output_pdf_file, "wb") as outputStream:
-            output.write(outputStream)
-
-        print(f"Searchable PDF created: {output_pdf_file}")
-        print(f"OCR results saved as JSON: {json_output_file}")
-        print(f"Words extracted and saved to text file: {words_output_file}")
-
-    except Exception as e:
-        print(f"Failed to process {filename}: {e}")
-
-
-def extract_words_from_json(ocr_data, output_text_file):
-    try:
-        words_list = []
-
-        # Iterate over the pages and words in the OCR result
-        for page in ocr_data.get("pages", []):
-            for word in page.get("words", []):
-                content = word.get("content", "")
-                words_list.append(content)
-
-        # Write all found words into the text file
-        with open(output_text_file, 'w') as output_file:
-            output_file.write("\n".join(words_list))
-
-        print(f"Extracted words saved to {output_text_file}")
-
-    except Exception as e:
-        print(f"Error processing OCR data: {e}")
-
-
-def handle_folder_upload(input_folder, output_folder, endpoint, api_key):
-    """Process PDFs from the input folder and subdirectories, and stop after the last PDF."""
-    result = ""
-    try:
-        os.makedirs(output_folder, exist_ok=True)
-
-        # Walk through the folder and subfolders to find PDFs
-        pdf_files = []
-        for root, dirs, files in os.walk(input_folder):
-            for file in files:
-                if file.lower().endswith('.pdf'):
-                    pdf_files.append(os.path.join(root, file))
-
-        if not pdf_files:
-            result += "No PDF files found!\n"
-            return result
-
-        # Processing PDF files in sequence and stopping after the last one
-        with ThreadPoolExecutor() as executor:
-            for i, pdf_file in enumerate(pdf_files):
-                filename = os.path.basename(pdf_file)
-                result += f"Processing {filename}\n"
-                executor.submit(process_pdf, pdf_file, output_folder, filename, endpoint, api_key)
-
-                if i == len(pdf_files) - 1:
-                    print("Last PDF processed. Stopping the program.")
-                    break
-
-        result += "Processing completed successfully!\n"
-    except Exception as e:
-        result = f"Error during processing: {e}"
-
-    return result
-
-
-def start_gui():
-    """Starts the Tkinter GUI and allows users to choose folders."""
-    # Initialize variables to hold selected folders and credentials
-    selected_input_folder = None
-    selected_output_folder = None
-    credentials_file_path = "/Volumes/SSD/python_projects/archscan_ai_read/azure_credentials.txt"  # Path to the credentials file
-
-    try:
-        endpoint, api_key = load_azure_credentials(credentials_file_path)
-        print(f"Azure endpoint and key loaded successfully!")
-    except Exception as e:
-        print(f"Failed to load credentials: {e}")
-        messagebox.showerror("Error", f"Failed to load credentials: {e}")
-        return
-
+def start_gui(handle_folder_upload):
+    """
+    Starts the Tkinter GUI and handles user interactions.
+    """
     def upload_folder():
-        nonlocal selected_input_folder
-        selected_input_folder = filedialog.askdirectory(title="Choose Input Folder")
-        folder_label.config(
-            text=f"Input folder: {selected_input_folder}" if selected_input_folder else "No folder selected")
+        input_folder_path = filedialog.askdirectory(title="Choose a folder containing PDF files")
+        if input_folder_path:
+            input_folder_label.config(text=f"Input folder: {os.path.basename(input_folder_path)}")
+            output_folder_path = filedialog.askdirectory(title="Choose a folder to save the results")
+            if output_folder_path:
+                output_folder_label.config(text=f"Output folder: {os.path.basename(output_folder_path)}")
+                status_label.config(text="Processing...")
+                progress_bar.start()
+                result = handle_folder_upload(input_folder_path, output_folder_path)
+                progress_bar.stop()
+                output_text.delete(1.0, tk.END)
+                output_text.insert(tk.END, result)
+                status_label.config(text="Processing complete.")
+            else:
+                messagebox.showwarning("No output folder selected", "Please select an output folder to save the results.")
+                status_label.config(text="No output folder selected.")
+        else:
+            messagebox.showwarning("No folder selected", "Please select a folder containing PDF files.")
+            status_label.config(text="No input folder selected.")
 
-    def choose_output_folder():
-        nonlocal selected_output_folder
-        selected_output_folder = filedialog.askdirectory(title="Choose Output Folder")
-        destination_label.config(
-            text=f"Output folder: {selected_output_folder}" if selected_output_folder else "No output folder selected")
-
-    def run_process():
-        if not selected_input_folder or not selected_output_folder:
-            messagebox.showwarning("Error", "Please select both input and output folders!")
-            return
-
-        status_label.config(text="Processing...")
-        result = handle_folder_upload(selected_input_folder, selected_output_folder, endpoint, api_key)
-        output_text.delete(1.0, tk.END)
-        output_text.insert(tk.END, result)
-        status_label.config(text="Processing completed!")
-
-    # Initialize Tkinter GUI
+    # Setup the GUI window
     root = tk.Tk()
-    root.title("PDF OCR Processor")
-    root.geometry("600x500")
+    root.title("PDF Analyzer")
+    root.geometry("900x700")
+    root.configure(bg='#f0f0f0')
 
-    # Labels and buttons for folder selection
-    upload_button = tk.Button(root, text="Select Input Folder", command=upload_folder)
+    # Header with Title
+    header_frame = tk.Frame(root, bg='#4a90e2', height=60)
+    header_frame.pack(fill='x')
+    title_label = tk.Label(header_frame, text="PDF Analyzer", font=("Helvetica", 24, "bold"), fg='white', bg='#4a90e2')
+    title_label.pack(pady=10)
+
+    # Main Frame for Content
+    main_frame = tk.Frame(root, bg='#f0f0f0')
+    main_frame.pack(padx=20, pady=20, fill='both', expand=True)
+
+    # Upload Button
+    upload_button = tk.Button(main_frame, text="Upload Folder", command=upload_folder, font=("Helvetica", 12),
+                              bg="#4a90e2", fg="white", padx=10, pady=5)
     upload_button.pack(pady=10)
 
-    folder_label = tk.Label(root, text="No input folder selected")
-    folder_label.pack(pady=10)
+    # Labels for Selected Folders
+    input_folder_label = tk.Label(main_frame, text="No input folder selected", font=("Helvetica", 12), bg="#f0f0f0")
+    input_folder_label.pack(pady=5)
+    output_folder_label = tk.Label(main_frame, text="No output folder selected", font=("Helvetica", 12), bg="#f0f0f0")
+    output_folder_label.pack(pady=5)
 
-    output_button = tk.Button(root, text="Select Output Folder", command=choose_output_folder)
-    output_button.pack(pady=10)
-
-    destination_label = tk.Label(root, text="No output folder selected")
-    destination_label.pack(pady=10)
-
-    # Button to run the process
-    run_button = tk.Button(root, text="Run", command=run_process)
-    run_button.pack(pady=20)
-
-    # Text area for displaying results
-    output_text = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=60, height=10)
+    # Output Area for Results
+    output_text = scrolledtext.ScrolledText(main_frame, wrap=tk.WORD, width=100, height=25, font=("Courier", 10))
     output_text.pack(pady=10)
 
-    # Status label
-    status_label = tk.Label(root, text="")
-    status_label.pack(pady=10)
+    # Status Label
+    status_label = tk.Label(main_frame, text="", font=("Helvetica", 10), bg="#f0f0f0", fg="#4a90e2")
+    status_label.pack(pady=5)
 
-    # Start the Tkinter main loop
+    # Footer with Progress Bar
+    footer_frame = tk.Frame(root, bg='#f0f0f0')
+    footer_frame.pack(fill='x', pady=10)
+    progress_bar = ttk.Progressbar(footer_frame, orient="horizontal", mode="indeterminate", length=400)
+    progress_bar.pack(pady=10)
+
     root.mainloop()
 
+def handle_folder_upload(input_folder_path, output_folder_path):
+    """
+    Processes all PDF files in the selected input folder and saves the results to the output folder.
+    """
+    endpoint = "https://as-lf-ai-01.cognitiveservices.azure.com/"
+    key = "18ce006f0ac44579a36bfaf01653254c"
+    document_intelligence_client = DocumentIntelligenceClient(
+        endpoint=endpoint, credential=AzureKeyCredential(key)
+    )
+    result_summary = ""
 
-if __name__ == '__main__':
-    start_gui()
+    # Iterate over all PDF files in the input folder
+    for filename in os.listdir(input_folder_path):
+        if filename.lower().endswith(".pdf"):
+            input_file_path = os.path.join(input_folder_path, filename)
+            input_file_name = os.path.splitext(filename)[0]
+
+            try:
+                # Analyze the PDF
+                with open(input_file_path, "rb") as f:
+                    poller = document_intelligence_client.begin_analyze_document(
+                        "prebuilt-read",
+                        analyze_request=f,
+                        output=[AnalyzeOutputOption.PDF],
+                        content_type="application/octet-stream",
+                    )
+                    result: AnalyzeResult = poller.result()
+
+                # Output file paths
+                pdf_output_file = os.path.join(output_folder_path, f"{input_file_name}.pdf")
+                json_output_file = os.path.join(output_folder_path, f"{input_file_name}.json")
+                txt_output_file = os.path.join(output_folder_path, f"{input_file_name}_filtered.txt")
+
+                # Save the analyzed PDF
+                response = document_intelligence_client.get_analyze_result_pdf(
+                    model_id=result.model_id, result_id=poller.details["operation_id"]
+                )
+                with open(pdf_output_file, "wb") as writer:
+                    writer.writelines(response)
+
+                # Save the JSON output
+                result_json = result.as_dict()
+                with open(json_output_file, "w") as json_file:
+                    json.dump(result_json, json_file, indent=4)
+
+                # Extract and filter words, then save to a text file
+                with open(txt_output_file, "w") as text_file:
+                    for page in result_json.get("pages", []):
+                        for line in page.get("lines", []):
+                            content = line.get("content", "")
+                            words = content.split()
+                            filtered_words = [word for word in words if word.lower() not in STOP_WORDS]
+                            text_file.write("\n".join(filtered_words) + "\n")
+
+                result_summary += f"Processed: {filename}\n"
+            except Exception as e:
+                result_summary += f"Failed to process {filename}: {str(e)}\n"
+
+    return result_summary
+
+# Start the GUI
+start_gui(handle_folder_upload)
