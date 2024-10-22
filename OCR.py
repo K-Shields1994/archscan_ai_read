@@ -20,10 +20,12 @@ STOP_WORDS = set([
     "yours", "yourself", "yourselves"
 ])
 
+
 def start_gui(handle_folder_upload):
     """
     Starts the Tkinter GUI and handles user interactions.
     """
+
     def upload_folder():
         input_folder_path = filedialog.askdirectory(title="Choose a folder containing PDF files")
         if input_folder_path:
@@ -39,7 +41,8 @@ def start_gui(handle_folder_upload):
                 output_text.insert(tk.END, result)
                 status_label.config(text="Processing complete.")
             else:
-                messagebox.showwarning("No output folder selected", "Please select an output folder to save the results.")
+                messagebox.showwarning("No output folder selected",
+                                       "Please select an output folder to save the results.")
                 status_label.config(text="No output folder selected.")
         else:
             messagebox.showwarning("No folder selected", "Please select a folder containing PDF files.")
@@ -87,6 +90,7 @@ def start_gui(handle_folder_upload):
     progress_bar.pack(pady=10)
 
     root.mainloop()
+
 
 def handle_folder_upload(input_folder_path, output_folder_path):
     """
@@ -147,6 +151,7 @@ def handle_folder_upload(input_folder_path, output_folder_path):
                 result_summary += f"Failed to process {filename}: {str(e)}\n"
 
     return result_summary
+
 
 # Start the GUI
 start_gui(handle_folder_upload)
